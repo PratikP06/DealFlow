@@ -10,8 +10,8 @@ const navigation = [
   { name: 'Fulfillment', href: '/dashboard/fulfillment', icon: TruckIcon },
   { name: 'Subscriptions', href: '/dashboard/subscriptions', icon: ArrowPathIcon },
   { name: 'Invoices', href: '/dashboard/invoices', icon: DocumentTextIcon },
-  { name: 'Deal Health', href: '/dashboard/deal-health', icon: ChartBarIcon },
-  { name: 'Products', href: '/dashboard/products', icon: CubeIcon },
+ 
+ 
 ]
 
 export default function SalesSidebar({ user, onClose }) {
