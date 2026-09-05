@@ -2,40 +2,6 @@ import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
-const roundMoney = (value) =>
-  Math.round(
-    (Number(value) +
-      Number.EPSILON) *
-      100
-  ) / 100
-
-const addInterval = (
-  date,
-  interval
-) => {
-  const next = new Date(date)
-
-  if (interval === 'MONTHLY') {
-    next.setMonth(
-      next.getMonth() + 1
-    )
-  }
-
-  if (interval === 'QUARTERLY') {
-    next.setMonth(
-      next.getMonth() + 3
-    )
-  }
-
-  if (interval === 'YEARLY') {
-    next.setFullYear(
-      next.getFullYear() + 1
-    )
-  }
-
-  return next
-}
-
 async function getInternalUser() {
   const session = await getSession()
 
@@ -50,6 +16,7 @@ async function getInternalUser() {
     where: {
       id: session.userId,
     },
+
     select: {
       id: true,
       role: true,
@@ -57,502 +24,533 @@ async function getInternalUser() {
   })
 }
 
-export async function GET() {
+/*
+ * GET
+ *
+ * Returns one complete invoice.
+ */
+export async function GET(
+  request,
+  { params }
+) {
   try {
     const user =
       await getInternalUser()
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        {
+          error: 'Unauthorized',
+        },
+        {
+          status: 401,
+        }
       )
     }
 
     if (user.role === 'ADMIN') {
       return NextResponse.json(
-        { error: 'Forbidden' },
-        { status: 403 }
+        {
+          error: 'Forbidden',
+        },
+        {
+          status: 403,
+        }
       )
     }
 
-    const where =
-      user.role === 'SALES_REP'
-        ? {
-            quotation: {
-              ownerId: user.id,
-            },
-          }
-        : {}
+    const { id } = await params
 
-    const invoices =
-      await prisma.invoice.findMany({
-        where,
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Invoice ID is required',
+        },
+        {
+          status: 400,
+        }
+      )
+    }
 
-        select: {
-          id: true,
-          invoiceNumber: true,
-          quotationId: true,
-          type: true,
-          status: true,
-          subtotal: true,
-          taxAmount: true,
-          totalAmount: true,
-          paidAmount: true,
-          creditAmount: true,
-          creditReason: true,
-          issueDate: true,
-          dueDate: true,
-          createdAt: true,
-          updatedAt: true,
+    const invoice =
+      await prisma.invoice.findUnique({
+        where: {
+          id,
+        },
 
+        include: {
           quotation: {
-            select: {
-              id: true,
-              quoteNumber: true,
-              status: true,
-
-              customer: {
+            include: {
+              customer: true,
+              owner: {
                 select: {
                   id: true,
                   name: true,
                   email: true,
-                  tier: true,
                 },
               },
             },
           },
 
-          _count: {
-            select: {
-              payments: true,
-              lines: true,
+          lines: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  description: true,
+                  unit: true,
+                },
+              },
+            },
+          },
+
+          payments: {
+            orderBy: {
+              paidAt: 'desc',
+            },
+          },
+
+          billingEntries: {
+            orderBy: {
+              billingDate: 'asc',
+            },
+
+            include: {
+              quotationLine: {
+                include: {
+                  product: {
+                    select: {
+                      id: true,
+                      sku: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
-
-        orderBy: {
-          createdAt: 'desc',
-        },
       })
 
+    if (!invoice) {
+      return NextResponse.json(
+        {
+          error: 'Invoice not found',
+        },
+        {
+          status: 404,
+        }
+      )
+    }
+
+    /*
+     * Sales representatives can only see invoices
+     * belonging to quotations they own.
+     *
+     * Managers and Finance can see all invoices.
+     */
+    if (
+      user.role === 'SALES_REP' &&
+      invoice.quotation.ownerId !==
+        user.id
+    ) {
+      return NextResponse.json(
+        {
+          error: 'Forbidden',
+        },
+        {
+          status: 403,
+        }
+      )
+    }
+
+    const total =
+      Number(
+        invoice.totalAmount || 0
+      )
+
+    const paid =
+      Number(
+        invoice.paidAmount || 0
+      )
+
+    const credit =
+      Number(
+        invoice.creditAmount || 0
+      )
+
+    const outstanding =
+      Math.max(
+        0,
+        total - paid - credit
+      )
+
     return NextResponse.json({
-      invoices,
+      invoice,
+
+      outstandingAmount:
+        outstanding,
     })
   } catch (error) {
     console.error(
-      'Sales invoices GET error:',
+      'Get invoice detail error:',
       error
     )
 
     return NextResponse.json(
       {
         error:
-          'Failed to fetch invoices',
+          'Failed to load invoice',
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     )
   }
 }
 
-export async function POST(request) {
+/*
+ * POST
+ *
+ * Records a payment against the invoice.
+ */
+export async function POST(
+  request,
+  { params }
+) {
   try {
     const user =
       await getInternalUser()
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        {
+          error: 'Unauthorized',
+        },
+        {
+          status: 401,
+        }
       )
     }
 
     if (user.role === 'ADMIN') {
       return NextResponse.json(
-        { error: 'Forbidden' },
-        { status: 403 }
+        {
+          error: 'Forbidden',
+        },
+        {
+          status: 403,
+        }
+      )
+    }
+
+    const { id } = await params
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Invoice ID is required',
+        },
+        {
+          status: 400,
+        }
       )
     }
 
     const body =
       await request.json()
 
-    const quotationId =
-      body?.quotationId
+    const amount =
+      Number(body.amount)
 
-    if (!quotationId) {
+    const method =
+      body.method
+
+    const reference =
+      body.reference?.trim() ||
+      null
+
+    const paidAt =
+      body.paidAt
+        ? new Date(body.paidAt)
+        : new Date()
+
+    /*
+     * Validate amount.
+     */
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
       return NextResponse.json(
         {
           error:
-            'quotationId is required',
+            'Payment amount must be greater than zero',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       )
     }
 
-    const quotation =
-      await prisma.quotation.findUnique(
-        {
-          where: {
-            id: quotationId,
-          },
+    /*
+     * Match Prisma PaymentMethod enum.
+     */
+    const validMethods = [
+      'CASH',
+      'BANK_TRANSFER',
+      'CARD',
+      'UPI',
+      'OTHER',
+    ]
 
-          include: {
-            lines: {
-              include: {
-                product: true,
-                subscriptionPlan: true,
-              },
+    if (
+      !validMethods.includes(method)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid payment method',
+        },
+        {
+          status: 400,
+        }
+      )
+    }
+
+    if (
+      Number.isNaN(
+        paidAt.getTime()
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid payment date',
+        },
+        {
+          status: 400,
+        }
+      )
+    }
+
+    const invoice =
+      await prisma.invoice.findUnique({
+        where: {
+          id,
+        },
+
+        include: {
+          quotation: {
+            select: {
+              ownerId: true,
             },
           },
-        }
-      )
+        },
+      })
 
-    if (!quotation) {
+    if (!invoice) {
       return NextResponse.json(
         {
           error:
-            'Quotation not found',
+            'Invoice not found',
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
+      )
+    }
+
+    /*
+     * Sales Rep can only operate on their
+     * own quotations.
+     */
+    if (
+      user.role === 'SALES_REP' &&
+      invoice.quotation.ownerId !==
+        user.id
+    ) {
+      return NextResponse.json(
+        {
+          error: 'Forbidden',
+        },
+        {
+          status: 403,
+        }
       )
     }
 
     if (
-      quotation.ownerId !== user.id &&
-      user.role !== 'SALES_MANAGER' &&
-      user.role !== 'FINANCE'
-    ) {
-      return NextResponse.json(
-        { error: 'Forbidden' },
-        { status: 403 }
-      )
-    }
-
-    if (
-      quotation.status !==
-      'CONFIRMED'
+      invoice.status === 'VOID'
     ) {
       return NextResponse.json(
         {
           error:
-            'Invoices can only be generated from confirmed quotations',
+            'Cannot record payment on a void invoice',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       )
     }
 
-    const oneTimeLines =
-      quotation.lines.filter(
-        (line) =>
-          line.lineType ===
-          'ONE_TIME'
+    const total =
+      Number(
+        invoice.totalAmount || 0
       )
 
-    const recurringLines =
-      quotation.lines.filter(
-        (line) =>
-          line.lineType ===
-          'RECURRING'
+    const alreadyPaid =
+      Number(
+        invoice.paidAmount || 0
       )
 
-    const existingOneTime =
-      await prisma.invoice.findFirst(
+    const credit =
+      Number(
+        invoice.creditAmount || 0
+      )
+
+    const outstanding =
+      Math.max(
+        0,
+        total -
+          alreadyPaid -
+          credit
+      )
+
+    if (amount > outstanding + 0.01) {
+      return NextResponse.json(
         {
-          where: {
-            quotationId,
-            type: 'ONE_TIME',
-          },
-
-          select: {
-            id: true,
-            invoiceNumber: true,
-          },
+          error:
+            `Payment exceeds outstanding amount of ₹${outstanding.toFixed(
+              2
+            )}`,
+        },
+        {
+          status: 400,
         }
       )
+    }
 
     const result =
       await prisma.$transaction(
         async (tx) => {
-          let invoice = null
+          const payment =
+            await tx.payment.create({
+              data: {
+                invoiceId: id,
 
-          if (
-            oneTimeLines.length >
-              0 &&
-            !existingOneTime
-          ) {
-            const invoiceLines =
-              oneTimeLines.map(
-                (line) => {
-                  const quantity =
-                    Number(
-                      line.quantity
-                    )
+                amount,
 
-                  const unitPrice =
-                    Number(
-                      line.unitPrice
-                    )
+                method,
 
-                  const discount =
-                    Number(
-                      line.discountPercent ||
-                        0
-                    )
+                reference,
 
-                  const tax =
-                    Number(
-                      line.taxPercentSnapshot ||
-                        0
-                    )
+                paidAt,
+              },
+            })
 
-                  const gross =
-                    quantity *
-                    unitPrice
+          const newPaidAmount =
+            alreadyPaid + amount
 
-                  const lineAmount =
-                    roundMoney(
-                      gross *
-                        (1 -
-                          discount /
-                            100)
-                    )
-
-                  return {
-                    productId:
-                      line.productId,
-
-                    description:
-                      line.product
-                        .name,
-
-                    lineType:
-                      line.lineType,
-
-                    quantity,
-                    unitPrice,
-                    discountPercent:
-                      discount,
-                    taxPercent: tax,
-                    lineAmount,
-                  }
-                }
-              )
-
-            const subtotal =
-              roundMoney(
-                invoiceLines.reduce(
-                  (
-                    sum,
-                    line
-                  ) =>
-                    sum +
-                    line.lineAmount,
-                  0
-                )
-              )
-
-            const taxAmount =
-              roundMoney(
-                invoiceLines.reduce(
-                  (
-                    sum,
-                    line
-                  ) =>
-                    sum +
-                    line.lineAmount *
-                      (line.taxPercent /
-                        100),
-                  0
-                )
-              )
-
-            const totalAmount =
-              roundMoney(
-                subtotal +
-                  taxAmount
-              )
-
-            const invoiceNumber =
-              `INV-${Date.now()
-                .toString()
-                .slice(-8)}`
-
-            const issueDate =
-              new Date()
-
-            const dueDate =
-              new Date(
-                issueDate
-              )
-
-            dueDate.setDate(
-              dueDate.getDate() +
-                30
+          const newOutstanding =
+            Math.max(
+              0,
+              total -
+                newPaidAmount -
+                credit
             )
 
-            invoice =
-              await tx.invoice.create(
-                {
-                  data: {
-                    invoiceNumber,
-                    quotationId,
-
-                    type: 'ONE_TIME',
-
-                    status: 'ISSUED',
-
-                    subtotal,
-                    taxAmount,
-                    totalAmount,
-
-                    paidAmount: 0,
-                    creditAmount: 0,
-
-                    issueDate,
-                    dueDate,
-
-                    lines: {
-                      create:
-                        invoiceLines,
-                    },
-                  },
-                }
-              )
-          }
+          let newStatus =
+            'PARTIALLY_PAID'
 
           if (
-            recurringLines.length >
-            0
+            newOutstanding <=
+            0.01
           ) {
-            for (
-              const line of recurringLines
-            ) {
-              const existingSchedule =
-                await tx.billingScheduleEntry.findFirst(
-                  {
-                    where: {
-                      quotationLineId:
-                        line.id,
-                    },
-                  }
-                )
-
-              if (
-                existingSchedule
-              ) {
-                continue
-              }
-
-              const start =
-                quotation.confirmedAt ||
-                new Date()
-
-              const end =
-                addInterval(
-                  start,
-                  line
-                    .subscriptionPlan
-                    ?.billingInterval
-                )
-
-              const amount =
-                roundMoney(
-                  Number(
-                    line.quantity
-                  ) *
-                    Number(
-                      line.unitPrice
-                    ) *
-                    (1 -
-                      Number(
-                        line.discountPercent ||
-                          0
-                      ) /
-                        100) *
-                    (1 +
-                      Number(
-                        line.taxPercentSnapshot ||
-                          0
-                      ) /
-                        100)
-                )
-
-              await tx.billingScheduleEntry.create(
-                {
-                  data: {
-                    quotationId,
-
-                    quotationLineId:
-                      line.id,
-
-                    periodStart:
-                      start,
-
-                    periodEnd:
-                      end,
-
-                    billingDate:
-                      start,
-
-                    quantity:
-                      line.quantity,
-
-                    amount,
-
-                    status:
-                      'SCHEDULED',
-                  },
-                }
-              )
-            }
+            newStatus = 'PAID'
           }
 
-          return invoice
+          const updatedInvoice =
+            await tx.invoice.update({
+              where: {
+                id,
+              },
+
+              data: {
+                paidAmount:
+                  newPaidAmount,
+
+                status:
+                  newStatus,
+              },
+            })
+
+          await tx.auditLog.create({
+            data: {
+              quotationId:
+                invoice.quotation
+                  ? undefined
+                  : undefined,
+
+              actorId: user.id,
+
+              action:
+                'INVOICE_PAYMENT_RECORDED',
+
+              entityType:
+                'Invoice',
+
+              entityId: id,
+
+              details: {
+                paymentId:
+                  payment.id,
+
+                amount,
+
+                method,
+
+                reference,
+              },
+            },
+          })
+
+          return {
+            payment,
+            invoice:
+              updatedInvoice,
+          }
         }
       )
 
-    return NextResponse.json(
-      {
-        message:
-          existingOneTime
-            ? 'Invoice already exists'
-            : 'Billing generated successfully',
+    return NextResponse.json({
+      success: true,
 
-        invoiceId:
-          result?.id ||
-          existingOneTime?.id ||
-          null,
+      payment:
+        result.payment,
 
-        invoiceNumber:
-          result?.invoiceNumber ||
-          existingOneTime?.invoiceNumber ||
-          null,
-
-        recurringSchedulesCreated:
-          recurringLines.length >
-          0,
-      },
-
-      {
-        status:
-          existingOneTime
-            ? 200
-            : 201,
-      }
-    )
+      invoice:
+        result.invoice,
+    })
   } catch (error) {
     console.error(
-      'Sales invoice generation error:',
+      'Record invoice payment error:',
       error
     )
 
     return NextResponse.json(
       {
         error:
-          'Failed to generate invoice',
+          error.message ||
+          'Failed to record payment',
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     )
   }
 }

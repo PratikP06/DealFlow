@@ -151,6 +151,10 @@ export async function POST(request) {
     }
 
     /*
+     * -------------------------------------------------------
+     * DISCOUNT TIER RULE
+     * -------------------------------------------------------
+     *
      * DiscountTierRule is a separate model.
      * It is keyed by Customer.tier.
      */
@@ -177,6 +181,7 @@ export async function POST(request) {
     /*
      * These are passed to the centralized risk calculator.
      */
+
     const riskLines = []
 
     for (const line of lines) {
@@ -202,6 +207,36 @@ export async function POST(request) {
       const requestedDiscount = Number(
         line.discountPercent || 0
       )
+
+      /*
+       * -----------------------------------------------------
+       * VALIDATE BASIC NUMERIC VALUES
+       * -----------------------------------------------------
+       */
+
+      const quantity = Number(line.quantity)
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return NextResponse.json(
+          {
+            error: `Invalid quantity for product ${product.name}`,
+          },
+          { status: 400 }
+        )
+      }
+
+      if (
+        !Number.isFinite(requestedDiscount) ||
+        requestedDiscount < 0 ||
+        requestedDiscount > 100
+      ) {
+        return NextResponse.json(
+          {
+            error: `Invalid discount for product ${product.name}`,
+          },
+          { status: 400 }
+        )
+      }
 
       /*
        * -----------------------------------------------------
@@ -234,9 +269,14 @@ export async function POST(request) {
         }
       }
 
-      const quantity = Number(
-        line.quantity
-      )
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        return NextResponse.json(
+          {
+            error: `Invalid price for product ${product.name}`,
+          },
+          { status: 400 }
+        )
+      }
 
       /*
        * -----------------------------------------------------
@@ -264,11 +304,12 @@ export async function POST(request) {
 
       /*
        * -----------------------------------------------------
-       * QUOTATION LINE
+       * QUOTATION LINE SNAPSHOTS
        * -----------------------------------------------------
        *
-       * We calculate the snapshot values here as well,
-       * using the same formula as risk.js.
+       * These values are frozen on the quotation so
+       * future configuration changes do not rewrite
+       * historical quotation data.
        */
 
       const categoryMaxDiscount = Number(
@@ -343,10 +384,44 @@ export async function POST(request) {
      * -------------------------------------------------------
      * APPROVAL REQUIREMENT
      * -------------------------------------------------------
+     *
+     * IMPORTANT:
+     *
+     * The SERVER decides whether approval is required.
+     *
+     * We do NOT trust the status sent by the browser.
      */
 
     const approvalRequired =
       riskResult.approvalRequired
+
+    /*
+     * -------------------------------------------------------
+     * FINAL QUOTATION STATUS
+     * -------------------------------------------------------
+     *
+     * Draft:
+     *   Keep the quotation as DRAFT.
+     *
+     * Submitted + low risk:
+     *   Automatically APPROVED.
+     *
+     * Submitted + approval required:
+     *   PENDING_APPROVAL.
+     *
+     * The browser cannot force a low-risk quotation into
+     * PENDING_APPROVAL.
+     */
+
+    const requestedStatus =
+      status || 'DRAFT'
+
+    const finalStatus =
+      requestedStatus === 'DRAFT'
+        ? 'DRAFT'
+        : approvalRequired
+        ? 'PENDING_APPROVAL'
+        : 'APPROVED'
 
     /*
      * -------------------------------------------------------
@@ -374,12 +449,16 @@ export async function POST(request) {
 
           ownerId: user.id,
 
-          status:
-            status || 'DRAFT',
+          /*
+           * IMPORTANT:
+           * Use the SERVER-CALCULATED status.
+           */
+          status: finalStatus,
 
           blendedRiskScore,
 
-          approvalRound: 0,
+          approvalRound:
+            approvalRequired ? 1 : 0,
 
           fulfillmentStatus:
             'PENDING',
@@ -393,6 +472,15 @@ export async function POST(request) {
 
           lastActivityAt:
             new Date(),
+
+          /*
+           * Low-risk submitted quotations are
+           * automatically approved.
+           */
+          approvedAt:
+            finalStatus === 'APPROVED'
+              ? new Date()
+              : null,
 
           lines: {
             create: processedLines,
@@ -437,10 +525,17 @@ export async function POST(request) {
         actorId:
           user.id,
 
+        /*
+         * The audit action is also based on the
+         * server-calculated result.
+         */
+
         action:
-          status === 'PENDING_APPROVAL'
+          finalStatus === 'DRAFT'
+            ? 'QUOTE_CREATED'
+            : approvalRequired
             ? 'QUOTE_SUBMITTED'
-            : 'QUOTE_CREATED',
+            : 'QUOTE_AUTO_APPROVED',
 
         entityType:
           'Quotation',
@@ -451,8 +546,10 @@ export async function POST(request) {
         details: {
           source: 'sales_rep',
 
+          requestedStatus,
+
           status:
-            status || 'DRAFT',
+            finalStatus,
 
           blendedRiskScore,
 
@@ -468,12 +565,12 @@ export async function POST(request) {
      * -------------------------------------------------------
      * AUTOMATIC APPROVAL ROUTING
      * -------------------------------------------------------
+     *
+     * Only quotations that actually require approval
+     * enter the approval chain.
      */
 
-    if (
-      status === 'PENDING_APPROVAL' &&
-      approvalRequired
-    ) {
+    if (approvalRequired) {
       /*
        * Use configured ApprovalRules if available.
        *
@@ -514,13 +611,29 @@ export async function POST(request) {
 
       /*
        * If a configured rule matches, use it.
-       * Otherwise fall back to the centralized risk routing.
+       * Otherwise fall back to centralized risk routing.
        */
 
       const requiredRoles =
         matchedRule?.requiredRoles?.length
           ? matchedRule.requiredRoles
           : riskResult.requiredRoles
+
+      /*
+       * Safety check:
+       * approvalRequired should always have at least
+       * one approval role.
+       */
+
+      if (!requiredRoles?.length) {
+        return NextResponse.json(
+          {
+            error:
+              'Approval is required but no approval role is configured.',
+          },
+          { status: 500 }
+        )
+      }
 
       for (
         let i = 0;
@@ -546,6 +659,11 @@ export async function POST(request) {
           },
         })
       }
+
+      /*
+       * Ensure the quotation remains in the
+       * approval state after routing.
+       */
 
       await prisma.quotation.update({
         where: {

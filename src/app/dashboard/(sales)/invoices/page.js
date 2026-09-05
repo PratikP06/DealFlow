@@ -23,7 +23,9 @@ const label = (value) =>
   value
     ? value
         .replaceAll('_', ' ')
-        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .replace(/\b\w/g, (c) =>
+          c.toUpperCase()
+        )
     : '—'
 
 function statusClass(status) {
@@ -42,7 +44,9 @@ function statusClass(status) {
   return 'bg-blue-50 text-blue-700 border-blue-200'
 }
 
-function DocumentIcon({ className = 'h-5 w-5' }) {
+function DocumentIcon({
+  className = 'h-5 w-5',
+}) {
   return (
     <svg
       className={className}
@@ -56,6 +60,7 @@ function DocumentIcon({ className = 'h-5 w-5' }) {
         strokeLinejoin="round"
         d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H7.5A2.25 2.25 0 0 0 5.25 4.5v15A2.25 2.25 0 0 0 7.5 21.75h9a3 3 0 0 0 3-3v-4.5Z"
       />
+
       <path
         strokeLinecap="round"
         d="M9 13.5h6m-6 3h4.5"
@@ -73,7 +78,12 @@ function SearchIcon() {
       stroke="currentColor"
       strokeWidth={2}
     >
-      <circle cx="11" cy="11" r="7" />
+      <circle
+        cx="11"
+        cy="11"
+        r="7"
+      />
+
       <path
         strokeLinecap="round"
         d="m20 20-4-4"
@@ -83,26 +93,41 @@ function SearchIcon() {
 }
 
 export default function InvoicesPage() {
-  const [invoices, setInvoices] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('ALL')
-  const [generating, setGenerating] = useState(false)
+  const [invoices, setInvoices] =
+    useState([])
+
+  const [loading, setLoading] =
+    useState(true)
+
+  const [error, setError] =
+    useState('')
+
+  const [search, setSearch] =
+    useState('')
+
+  const [filter, setFilter] =
+    useState('ALL')
 
   async function loadInvoices() {
     setLoading(true)
     setError('')
 
     try {
-      const response = await fetch(
-        '/api/sales/invoices',
-        {
-          cache: 'no-store',
-        }
-      )
+      /*
+       * GET automatically creates invoices for approved
+       * quotations before returning the list.
+       */
 
-      const data = await response.json()
+      const response =
+        await fetch(
+          '/api/sales/invoices',
+          {
+            cache: 'no-store',
+          }
+        )
+
+      const data =
+        await response.json()
 
       if (!response.ok) {
         throw new Error(
@@ -111,7 +136,9 @@ export default function InvoicesPage() {
         )
       }
 
-      setInvoices(data.invoices || [])
+      setInvoices(
+        data.invoices || []
+      )
     } catch (err) {
       setError(
         err.message ||
@@ -122,119 +149,96 @@ export default function InvoicesPage() {
     }
   }
 
-  async function generateInvoice() {
-    const quotationId = window.prompt(
-      'Enter the confirmed quotation ID:'
-    )
-
-    if (!quotationId) return
-
-    setGenerating(true)
-    setError('')
-
-    try {
-      const response = await fetch(
-        '/api/sales/invoices',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            quotationId,
-          }),
-        }
-      )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            'Failed to generate invoice'
-        )
-      }
-
-      await loadInvoices()
-
-      window.alert(
-        data.invoiceNumber
-          ? `Invoice ${data.invoiceNumber} is ready.`
-          : 'Billing generated successfully.'
-      )
-    } catch (err) {
-      setError(
-        err.message ||
-          'Failed to generate invoice'
-      )
-    } finally {
-      setGenerating(false)
-    }
-  }
-
   useEffect(() => {
     loadInvoices()
   }, [])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+  const filtered =
+    useMemo(() => {
+      const q =
+        search
+          .trim()
+          .toLowerCase()
 
-    return invoices.filter((invoice) => {
-      const matchesSearch =
-        !q ||
-        [
-          invoice.invoiceNumber,
-          invoice.quotation?.quoteNumber,
-          invoice.quotation?.customer?.name,
-          invoice.quotation?.customer?.email,
-        ].some((value) =>
-          String(value || '')
-            .toLowerCase()
-            .includes(q)
-        )
+      return invoices.filter(
+        (invoice) => {
+          const matchesSearch =
+            !q ||
+            [
+              invoice.invoiceNumber,
 
-      const matchesFilter =
-        filter === 'ALL' ||
-        invoice.status === filter
+              invoice.quotation
+                ?.quoteNumber,
 
-      return (
-        matchesSearch &&
-        matchesFilter
+              invoice.quotation
+                ?.customer
+                ?.name,
+
+              invoice.quotation
+                ?.customer
+                ?.email,
+            ].some((value) =>
+              String(value || '')
+                .toLowerCase()
+                .includes(q)
+            )
+
+          const matchesFilter =
+            filter === 'ALL' ||
+            invoice.status ===
+              filter
+
+          return (
+            matchesSearch &&
+            matchesFilter
+          )
+        }
       )
-    })
-  }, [
-    invoices,
-    search,
-    filter,
-  ])
+    }, [
+      invoices,
+      search,
+      filter,
+    ])
 
-  const stats = useMemo(
-    () => ({
-      total: invoices.length,
+  const stats =
+    useMemo(
+      () => ({
+        total:
+          invoices.length,
 
-      unpaid: invoices.filter(
-        (invoice) =>
-          invoice.status === 'ISSUED'
-      ).length,
+        unpaid:
+          invoices.filter(
+            (invoice) =>
+              invoice.status ===
+              'ISSUED'
+          ).length,
 
-      partial: invoices.filter(
-        (invoice) =>
-          invoice.status ===
-          'PARTIALLY_PAID'
-      ).length,
+        partial:
+          invoices.filter(
+            (invoice) =>
+              invoice.status ===
+              'PARTIALLY_PAID'
+          ).length,
 
-      paid: invoices.filter(
-        (invoice) =>
-          invoice.status === 'PAID'
-      ).length,
-    }),
-    [invoices]
-  )
+        paid:
+          invoices.filter(
+            (invoice) =>
+              invoice.status ===
+              'PAID'
+          ).length,
+      }),
+      [invoices]
+    )
 
   return (
     <div className="mx-auto w-full max-w-[1280px] space-y-6">
+
+      {/* HEADER */}
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+
         <div className="flex items-start gap-3">
+
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
             <DocumentIcon />
           </div>
@@ -245,24 +249,19 @@ export default function InvoicesPage() {
             </h1>
 
             <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              Track one-time invoices,
-              recurring billing and
-              payments.
+              Automatically generated from approved quotations.
             </p>
           </div>
+
         </div>
 
-        <button
-          type="button"
-          onClick={generateInvoice}
-          disabled={generating}
-          className="rounded-lg bg-[var(--color-primary-600)] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[var(--color-primary-700)] disabled:opacity-60"
-        >
-          {generating
-            ? 'Generating…'
-            : '+ Generate Invoice'}
-        </button>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-medium text-emerald-700">
+          ✓ Automatic billing enabled
+        </div>
+
       </div>
+
+      {/* ERROR */}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -270,23 +269,29 @@ export default function InvoicesPage() {
         </div>
       )}
 
+      {/* STATS */}
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+
         {[
           [
             'Total invoices',
             stats.total,
             'text-slate-900',
           ],
+
           [
             'Unpaid',
             stats.unpaid,
             'text-amber-600',
           ],
+
           [
             'Partially paid',
             stats.partial,
             'text-blue-600',
           ],
+
           [
             'Paid',
             stats.paid,
@@ -310,11 +315,17 @@ export default function InvoicesPage() {
             </div>
           )
         )}
+
       </div>
 
+      {/* SEARCH */}
+
       <div className="rounded-xl border border-[var(--color-border)] bg-white p-4">
+
         <div className="flex flex-col gap-3 sm:flex-row">
+
           <div className="relative flex-1">
+
             <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
               <SearchIcon />
             </div>
@@ -322,41 +333,56 @@ export default function InvoicesPage() {
             <input
               value={search}
               onChange={(event) =>
-                setSearch(event.target.value)
+                setSearch(
+                  event.target.value
+                )
               }
               placeholder="Search invoice, customer or quotation…"
               className="w-full rounded-lg border border-[var(--color-border)] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
+
           </div>
 
           <select
             value={filter}
             onChange={(event) =>
-              setFilter(event.target.value)
+              setFilter(
+                event.target.value
+              )
             }
             className="rounded-lg border border-[var(--color-border)] px-3 py-2.5 text-sm outline-none focus:border-indigo-500"
           >
             <option value="ALL">
               All statuses
             </option>
+
             <option value="ISSUED">
               Issued
             </option>
+
             <option value="PARTIALLY_PAID">
               Partially paid
             </option>
+
             <option value="PAID">
               Paid
             </option>
+
             <option value="VOID">
               Void
             </option>
           </select>
+
         </div>
+
       </div>
 
+      {/* INVOICE TABLE */}
+
       <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-white">
+
         <div className="border-b border-[var(--color-border)] px-5 py-4">
+
           <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
             Invoice history
           </h2>
@@ -367,10 +393,12 @@ export default function InvoicesPage() {
               ? ''
               : 's'}
           </p>
+
         </div>
 
         {loading ? (
           <div className="space-y-3 p-5">
+
             {[1, 2, 3, 4].map(
               (number) => (
                 <div
@@ -379,16 +407,34 @@ export default function InvoicesPage() {
                 />
               )
             )}
+
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="px-5 py-16 text-center text-sm text-[var(--color-text-secondary)]">
-            No invoices found.
+        ) : filtered.length ===
+          0 ? (
+          <div className="px-5 py-16 text-center">
+
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+              <DocumentIcon />
+            </div>
+
+            <p className="mt-4 text-sm font-medium text-slate-700">
+              No invoices found
+            </p>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Approved quotations automatically appear here with their generated invoice.
+            </p>
+
           </div>
         ) : (
           <div className="overflow-x-auto">
+
             <table className="w-full min-w-[850px]">
+
               <thead className="bg-slate-50/70">
+
                 <tr className="border-b border-[var(--color-border)] text-left">
+
                   {[
                     'Invoice',
                     'Customer',
@@ -406,17 +452,22 @@ export default function InvoicesPage() {
                       </th>
                     )
                   )}
+
                 </tr>
+
               </thead>
 
               <tbody className="divide-y divide-[var(--color-border)]">
+
                 {filtered.map(
                   (invoice) => (
                     <tr
                       key={invoice.id}
                       className="hover:bg-slate-50/70"
                     >
+
                       <td className="px-5 py-4">
+
                         <div className="text-sm font-semibold text-[var(--color-text-primary)]">
                           {
                             invoice.invoiceNumber
@@ -428,9 +479,11 @@ export default function InvoicesPage() {
                             invoice.type
                           )}
                         </div>
+
                       </td>
 
                       <td className="px-5 py-4">
+
                         <div className="text-sm font-medium text-[var(--color-text-primary)]">
                           {invoice.quotation
                             ?.customer
@@ -443,9 +496,11 @@ export default function InvoicesPage() {
                             ?.quoteNumber ||
                             '—'}
                         </div>
+
                       </td>
 
                       <td className="px-5 py-4">
+
                         <div className="text-sm font-semibold text-[var(--color-text-primary)]">
                           {money(
                             invoice.totalAmount
@@ -458,9 +513,11 @@ export default function InvoicesPage() {
                             invoice.paidAmount
                           )}
                         </div>
+
                       </td>
 
                       <td className="px-5 py-4">
+
                         <span
                           className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass(
                             invoice.status
@@ -470,6 +527,7 @@ export default function InvoicesPage() {
                             invoice.status
                           )}
                         </span>
+
                       </td>
 
                       <td className="px-5 py-4 text-sm text-[var(--color-text-secondary)]">
@@ -479,21 +537,29 @@ export default function InvoicesPage() {
                       </td>
 
                       <td className="px-5 py-4 text-right">
+
                         <Link
                           href={`/dashboard/invoices/${invoice.id}`}
-                          className="text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+                          className="inline-flex items-center rounded-lg border border-[var(--color-border)] bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50"
                         >
-                          View →
+                          View Invoice →
                         </Link>
+
                       </td>
+
                     </tr>
                   )
                 )}
+
               </tbody>
+
             </table>
+
           </div>
         )}
+
       </div>
+
     </div>
   )
 }

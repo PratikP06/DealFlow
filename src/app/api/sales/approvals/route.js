@@ -4,142 +4,308 @@ import { prisma } from '@/lib/prisma'
 
 export async function GET() {
   try {
+    /*
+     * -------------------------------------------------------
+     * AUTHENTICATION
+     * -------------------------------------------------------
+     */
+
     const session = await getSession()
 
-    if (!session || session.type !== 'internal') {
+    if (
+      !session ||
+      session.type !== 'internal'
+    ) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        {
+          error: 'Unauthorized',
+        },
+        {
+          status: 401,
+        }
       )
     }
 
-    const user = await prisma.user.findUnique({
-      where: {
-        id: session.userId,
-      },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-      },
-    })
+    /*
+     * -------------------------------------------------------
+     * LOAD USER
+     * -------------------------------------------------------
+     */
+
+    const user =
+      await prisma.user.findUnique({
+        where: {
+          id: session.userId,
+        },
+
+        select: {
+          id: true,
+          name: true,
+          role: true,
+        },
+      })
 
     if (!user) {
       return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
+        {
+          error: 'User not found',
+        },
+        {
+          status: 404,
+        }
       )
     }
+
+    /*
+     * -------------------------------------------------------
+     * ONLY SALES MANAGER + FINANCE CAN APPROVE
+     * -------------------------------------------------------
+     */
 
     if (
       user.role !== 'SALES_MANAGER' &&
       user.role !== 'FINANCE'
     ) {
       return NextResponse.json(
-        { error: 'You are not an approver' },
-        { status: 403 }
+        {
+          error:
+            'You are not an approver',
+        },
+        {
+          status: 403,
+        }
       )
     }
 
-    const quotations = await prisma.quotation.findMany({
-      where: {
-        status: 'PENDING_APPROVAL',
+    /*
+     * -------------------------------------------------------
+     * GET QUOTATIONS THAT ARE CURRENTLY
+     * WAITING FOR AN APPROVAL
+     * -------------------------------------------------------
+     *
+     * We initially fetch quotations that:
+     *
+     * 1. Are PENDING_APPROVAL
+     * 2. Have a PENDING approval step
+     *    for the current user's role.
+     *
+     * We determine the CURRENT actionable step
+     * below because Prisma cannot directly compare
+     * approvalSteps.approvalRound with
+     * quotation.approvalRound inside this relation filter.
+     */
 
-        approvalSteps: {
-          some: {
-            approvalRound: {
-              // We only want the current approval round.
-              // This is additionally filtered below.
-              not: undefined,
+    const quotations =
+      await prisma.quotation.findMany({
+        where: {
+          status: 'PENDING_APPROVAL',
+
+          approvalSteps: {
+            some: {
+              approverRole:
+                user.role,
+
+              status: 'PENDING',
             },
-
-            approverRole: user.role,
-
-            status: 'PENDING',
-          },
-        },
-      },
-
-      include: {
-        customer: {
-          select: {
-            id: true,
-            name: true,
-            tier: true,
-            email: true,
-          },
-        },
-
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
           },
         },
 
-        approvalSteps: {
-          orderBy: [
-            {
-              approvalRound: 'desc',
-            },
-            {
-              stepOrder: 'asc',
-            },
-          ],
+        include: {
+          /*
+           * -------------------------------------------------
+           * CUSTOMER
+           * -------------------------------------------------
+           */
 
-          include: {
-            actedBy: {
-              select: {
-                id: true,
-                name: true,
-                role: true,
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              tier: true,
+              email: true,
+            },
+          },
+
+          /*
+           * -------------------------------------------------
+           * SALES REP / OWNER
+           * -------------------------------------------------
+           */
+
+          owner: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+
+          /*
+           * -------------------------------------------------
+           * APPROVAL CHAIN
+           * -------------------------------------------------
+           */
+
+          approvalSteps: {
+            orderBy: [
+              {
+                approvalRound:
+                  'desc',
+              },
+
+              {
+                stepOrder:
+                  'asc',
+              },
+            ],
+
+            include: {
+              actedBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  role: true,
+                },
+              },
+            },
+          },
+
+          /*
+           * -------------------------------------------------
+           * QUOTATION LINES
+           * -------------------------------------------------
+           *
+           * Useful for the approval screen so the manager
+           * / finance user can inspect discounts and products.
+           */
+
+          lines: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  price: true,
+                  taxPercent: true,
+                },
+              },
+
+              subscriptionPlan: {
+                select: {
+                  id: true,
+                  name: true,
+                  price: true,
+                  billingInterval: true,
+                  durationMonths: true,
+                },
               },
             },
           },
         },
-      },
 
-      orderBy: {
-        updatedAt: 'desc',
-      },
-    })
+        orderBy: {
+          updatedAt: 'desc',
+        },
+      })
 
     /*
-     * Only expose quotations where the logged-in user's role
-     * is the CURRENT actionable approval step.
+     * -------------------------------------------------------
+     * DETERMINE ACTIONABLE APPROVALS
+     * -------------------------------------------------------
      *
-     * This keeps Finance from seeing a quote before the
-     * Sales Manager has approved it.
+     * Example:
+     *
+     * Round 0:
+     *
+     *   Step 1 -> SALES_MANAGER -> APPROVED
+     *   Step 2 -> FINANCE      -> PENDING
+     *
+     * Finance should see it.
+     *
+     * But before manager approval:
+     *
+     *   Step 1 -> SALES_MANAGER -> PENDING
+     *   Step 2 -> FINANCE      -> PENDING
+     *
+     * Finance must NOT see it yet.
      */
-    const actionable = quotations.filter((quotation) => {
-      const currentRoundSteps =
-        quotation.approvalSteps.filter(
-          (step) =>
-            step.approvalRound === quotation.approvalRound
-        )
 
-      const currentStep =
-        currentRoundSteps
-          .filter((step) => step.status === 'PENDING')
-          .sort((a, b) => a.stepOrder - b.stepOrder)[0]
+    const actionable =
+      quotations.filter(
+        (quotation) => {
+          /*
+           * Get only steps from the quotation's
+           * current approval round.
+           */
 
-      return (
-        currentStep &&
-        currentStep.approverRole === user.role
+          const currentRoundSteps =
+            quotation.approvalSteps.filter(
+              (step) =>
+                step.approvalRound ===
+                quotation.approvalRound
+            )
+
+          /*
+           * Find the FIRST pending step.
+           *
+           * stepOrder determines the approval chain.
+           */
+
+          const currentStep =
+            currentRoundSteps
+              .filter(
+                (step) =>
+                  step.status ===
+                  'PENDING'
+              )
+              .sort(
+                (a, b) =>
+                  a.stepOrder -
+                  b.stepOrder
+              )[0]
+
+          /*
+           * The quotation belongs in this user's
+           * queue only when THIS USER'S ROLE is
+           * the current pending approval step.
+           */
+
+          if (!currentStep) {
+            return false
+          }
+
+          return (
+            currentStep.approverRole ===
+            user.role
+          )
+        }
       )
-    })
 
-    return NextResponse.json(actionable)
+    /*
+     * -------------------------------------------------------
+     * RETURN RESULT
+     * -------------------------------------------------------
+     */
+
+    return NextResponse.json(
+      actionable
+    )
   } catch (error) {
-    console.error('Get approvals error:', error)
+    console.error(
+      'Get approvals error:',
+      error
+    )
 
     return NextResponse.json(
       {
         error:
-          error.message || 'Internal server error',
+          error.message ||
+          'Internal server error',
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     )
   }
 }

@@ -61,7 +61,7 @@ export default function ApprovalsPage() {
     const returned = approvals.filter(
       (quote) =>
         quote.status ===
-        'RETURNED_FOR_REVISION'
+        'RETURNED'
     ).length
 
     const approved = approvals.filter(

@@ -2,35 +2,54 @@ import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+/*
+ * Get the currently logged-in approver.
+ *
+ * Only Sales Manager and Finance are allowed
+ * to use the approval workflow.
+ */
 async function getApprover() {
   const session = await getSession()
 
-  if (!session || session.type !== 'internal') {
+  if (
+    !session ||
+    session.type !== 'internal'
+  ) {
     return {
       error: NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        {
+          error: 'Unauthorized',
+        },
+        {
+          status: 401,
+        }
       ),
     }
   }
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.userId,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-    },
-  })
+  const user =
+    await prisma.user.findUnique({
+      where: {
+        id: session.userId,
+      },
+
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+      },
+    })
 
   if (!user) {
     return {
       error: NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
+        {
+          error: 'User not found',
+        },
+        {
+          status: 404,
+        }
       ),
     }
   }
@@ -41,18 +60,72 @@ async function getApprover() {
   ) {
     return {
       error: NextResponse.json(
-        { error: 'You are not an approver' },
-        { status: 403 }
+        {
+          error: 'You are not an approver',
+        },
+        {
+          status: 403,
+        }
       ),
     }
   }
 
-  return { user }
+  return {
+    user,
+  }
 }
 
-export async function GET(request, { params }) {
+
+/*
+ * Find the first pending step in the
+ * quotation's current approval round.
+ */
+function getCurrentStep(
+  quotation
+) {
+  const currentRoundSteps =
+    quotation.approvalSteps
+      .filter(
+        (step) =>
+          step.approvalRound ===
+          quotation.approvalRound
+      )
+      .sort(
+        (a, b) =>
+          a.stepOrder -
+          b.stepOrder
+      )
+
+  const currentStep =
+    currentRoundSteps.find(
+      (step) =>
+        step.status === 'PENDING'
+    ) || null
+
+  return {
+    currentRoundSteps,
+    currentStep,
+  }
+}
+
+
+/*
+ * ============================================================
+ * GET
+ * ============================================================
+ *
+ * Returns quotation + approval chain.
+ *
+ * Finance only gets canAct=true when Finance is
+ * actually the current pending approval step.
+ */
+export async function GET(
+  request,
+  { params }
+) {
   try {
-    const auth = await getApprover()
+    const auth =
+      await getApprover()
 
     if (auth.error) {
       return auth.error
@@ -60,6 +133,18 @@ export async function GET(request, { params }) {
 
     const { user } = auth
     const { id } = await params
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Quotation ID is required',
+        },
+        {
+          status: 400,
+        }
+      )
+    }
 
     const quotation =
       await prisma.quotation.findUnique({
@@ -143,72 +228,86 @@ export async function GET(request, { params }) {
 
     if (!quotation) {
       return NextResponse.json(
-        { error: 'Quotation not found' },
-        { status: 404 }
+        {
+          error: 'Quotation not found',
+        },
+        {
+          status: 404,
+        }
       )
     }
 
-    /*
-     * Find the current actionable step.
-     */
-    const currentRoundSteps =
-      quotation.approvalSteps
-        .filter(
-          (step) =>
-            step.approvalRound ===
-            quotation.approvalRound
-        )
-        .sort(
-          (a, b) =>
-            a.stepOrder - b.stepOrder
-        )
-
-    const currentStep =
-      currentRoundSteps.find(
-        (step) => step.status === 'PENDING'
-      ) || null
+    const {
+      currentStep,
+    } = getCurrentStep(
+      quotation
+    )
 
     const canAct =
-      quotation.status === 'PENDING_APPROVAL' &&
-      currentStep &&
-      currentStep.approverRole === user.role
+      quotation.status ===
+        'PENDING_APPROVAL' &&
+      currentStep !== null &&
+      currentStep.approverRole ===
+        user.role
 
     return NextResponse.json({
       ...quotation,
 
       blendedRiskScore:
-        Number(quotation.blendedRiskScore),
+        Number(
+          quotation.blendedRiskScore
+        ),
 
-      lines: quotation.lines.map((line) => ({
-        ...line,
+      lines:
+        quotation.lines.map(
+          (line) => ({
+            ...line,
 
-        quantity: Number(line.quantity),
-        unitPrice: Number(line.unitPrice),
-        discountPercent:
-          Number(line.discountPercent),
+            quantity:
+              Number(
+                line.quantity
+              ),
 
-        allowedDiscountPercentSnapshot:
-          Number(
-            line.allowedDiscountPercentSnapshot
-          ),
+            unitPrice:
+              Number(
+                line.unitPrice
+              ),
 
-        discountOveragePercent:
-          Number(
-            line.discountOveragePercent
-          ),
+            discountPercent:
+              Number(
+                line.discountPercent
+              ),
 
-        taxPercentSnapshot:
-          Number(line.taxPercentSnapshot),
+            allowedDiscountPercentSnapshot:
+              Number(
+                line.allowedDiscountPercentSnapshot
+              ),
 
-        marginPercentSnapshot:
-          line.marginPercentSnapshot !== null
-            ? Number(line.marginPercentSnapshot)
-            : null,
-      })),
+            discountOveragePercent:
+              Number(
+                line.discountOveragePercent
+              ),
+
+            taxPercentSnapshot:
+              Number(
+                line.taxPercentSnapshot
+              ),
+
+            marginPercentSnapshot:
+              line.marginPercentSnapshot !==
+              null
+                ? Number(
+                    line.marginPercentSnapshot
+                  )
+                : null,
+          })
+        ),
 
       currentStep,
 
-      canAct: Boolean(canAct),
+      canAct: Boolean(
+        canAct
+      ),
 
       currentUser: {
         id: user.id,
@@ -225,16 +324,38 @@ export async function GET(request, { params }) {
     return NextResponse.json(
       {
         error:
-          error.message || 'Internal server error',
+          error.message ||
+          'Internal server error',
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     )
   }
 }
 
-export async function POST(request, { params }) {
+
+/*
+ * ============================================================
+ * POST
+ * ============================================================
+ *
+ * Actions:
+ *
+ * approve
+ * reject
+ * return
+ *
+ * The server ALWAYS determines the current approval step.
+ * The client cannot choose which step to approve.
+ */
+export async function POST(
+  request,
+  { params }
+) {
   try {
-    const auth = await getApprover()
+    const auth =
+      await getApprover()
 
     if (auth.error) {
       return auth.error
@@ -243,34 +364,58 @@ export async function POST(request, { params }) {
     const { user } = auth
     const { id } = await params
 
-    const body = await request.json()
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Quotation ID is required',
+        },
+        {
+          status: 400,
+        }
+      )
+    }
 
-    const action = String(
-      body.action || ''
-    ).toLowerCase()
+    const body =
+      await request.json()
+
+    const action =
+      String(
+        body.action || ''
+      ).toLowerCase()
 
     const reason =
-      typeof body.reason === 'string'
+      typeof body.reason ===
+      'string'
         ? body.reason.trim()
         : ''
 
     if (
-      !['approve', 'reject', 'return'].includes(
-        action
-      )
+      ![
+        'approve',
+        'reject',
+        'return',
+      ].includes(action)
     ) {
       return NextResponse.json(
         {
           error:
             'Action must be approve, reject, or return',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       )
     }
 
+    /*
+     * Reject and Return require an explanation.
+     */
     if (
-      (action === 'reject' ||
-        action === 'return') &&
+      (
+        action === 'reject' ||
+        action === 'return'
+      ) &&
       !reason
     ) {
       return NextResponse.json(
@@ -278,10 +423,15 @@ export async function POST(request, { params }) {
           error:
             'A reason is required for reject or return',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       )
     }
 
+    /*
+     * Load quotation and approval chain.
+     */
     const quotation =
       await prisma.quotation.findUnique({
         where: {
@@ -312,11 +462,20 @@ export async function POST(request, { params }) {
 
     if (!quotation) {
       return NextResponse.json(
-        { error: 'Quotation not found' },
-        { status: 404 }
+        {
+          error:
+            'Quotation not found',
+        },
+        {
+          status: 404,
+        }
       )
     }
 
+    /*
+     * Only PENDING_APPROVAL quotations can
+     * receive approval actions.
+     */
     if (
       quotation.status !==
       'PENDING_APPROVAL'
@@ -326,33 +485,18 @@ export async function POST(request, { params }) {
           error:
             'This quotation is not awaiting approval',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       )
     }
 
-    /*
-     * Get steps for the current approval round.
-     */
-    const currentRoundSteps =
-      quotation.approvalSteps
-        .filter(
-          (step) =>
-            step.approvalRound ===
-            quotation.approvalRound
-        )
-        .sort(
-          (a, b) =>
-            a.stepOrder - b.stepOrder
-        )
-
-    /*
-     * The first pending step is the only step
-     * allowed to act.
-     */
-    const currentStep =
-      currentRoundSteps.find(
-        (step) => step.status === 'PENDING'
-      )
+    const {
+      currentRoundSteps,
+      currentStep,
+    } = getCurrentStep(
+      quotation
+    )
 
     if (!currentStep) {
       return NextResponse.json(
@@ -360,80 +504,98 @@ export async function POST(request, { params }) {
           error:
             'No pending approval step exists',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       )
     }
 
+    /*
+     * Critical security check:
+     *
+     * A Finance user cannot approve a Manager step.
+     * A Manager cannot approve a Finance step.
+     */
     if (
-      currentStep.approverRole !== user.role
+      currentStep.approverRole !==
+      user.role
     ) {
       return NextResponse.json(
         {
           error:
             `This approval belongs to ${currentStep.approverRole}`,
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       )
     }
 
     /*
-     * Prevent the quotation owner from approving
-     * their own quotation.
+     * Prevent self approval.
      */
-    const quotationOwner =
-      await prisma.quotation.findUnique({
-        where: {
-          id: quotation.id,
-        },
-        select: {
-          ownerId: true,
-        },
-      })
-
     if (
-      quotationOwner?.ownerId === user.id
+      quotation.ownerId ===
+      user.id
     ) {
       return NextResponse.json(
         {
           error:
             'You cannot approve your own quotation',
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       )
     }
 
-    const now = new Date()
+    const now =
+      new Date()
 
     /*
-     * ---------------------------------------------------------
+     * ========================================================
      * REJECT
-     * ---------------------------------------------------------
+     * ========================================================
      */
-    if (action === 'reject') {
+    if (
+      action === 'reject'
+    ) {
       const updated =
         await prisma.$transaction(
           async (tx) => {
+
             await tx.approvalStep.update({
               where: {
-                id: currentStep.id,
+                id:
+                  currentStep.id,
               },
 
               data: {
-                status: 'REJECTED',
-                actedById: user.id,
-                actedAt: now,
+                status:
+                  'REJECTED',
+
+                actedById:
+                  user.id,
+
+                actedAt:
+                  now,
+
                 reason,
               },
             })
 
             await tx.quotation.update({
               where: {
-                id: quotation.id,
+                id:
+                  quotation.id,
               },
 
               data: {
-                status: 'REJECTED',
-                lastActivityAt: now,
+                status:
+                  'REJECTED',
+
+                lastActivityAt:
+                  now,
               },
             })
 
@@ -442,7 +604,8 @@ export async function POST(request, { params }) {
                 quotationId:
                   quotation.id,
 
-                actorId: user.id,
+                actorId:
+                  user.id,
 
                 action:
                   'QUOTE_REJECTED',
@@ -470,54 +633,84 @@ export async function POST(request, { params }) {
 
             return tx.quotation.findUnique({
               where: {
-                id: quotation.id,
+                id:
+                  quotation.id,
               },
+
               include: {
                 approvalSteps: {
-                  orderBy: {
-                    stepOrder: 'asc',
-                  },
+                  orderBy: [
+                    {
+                      approvalRound:
+                        'desc',
+                    },
+                    {
+                      stepOrder:
+                        'asc',
+                    },
+                  ],
                 },
               },
             })
           }
         )
 
-      return NextResponse.json(updated)
+      return NextResponse.json(
+        updated
+      )
     }
 
+
     /*
-     * ---------------------------------------------------------
-     * RETURN FOR REVISION
-     * ---------------------------------------------------------
+     * ========================================================
+     * RETURN
+     * ========================================================
+     *
+     * Correct Prisma enum:
+     *
+     * RETURNED
+     *
+     * NOT RETURNED_FOR_REVISION.
      */
-    if (action === 'return') {
+    if (
+      action === 'return'
+    ) {
       const updated =
         await prisma.$transaction(
           async (tx) => {
+
             await tx.approvalStep.update({
               where: {
-                id: currentStep.id,
+                id:
+                  currentStep.id,
               },
 
               data: {
-                status: 'RETURNED',
-                actedById: user.id,
-                actedAt: now,
+                status:
+                  'RETURNED',
+
+                actedById:
+                  user.id,
+
+                actedAt:
+                  now,
+
                 reason,
               },
             })
 
             await tx.quotation.update({
               where: {
-                id: quotation.id,
+                id:
+                  quotation.id,
               },
 
               data: {
                 status:
-                  'RETURNED_FOR_REVISION',
+                  'RETURNED',
 
-                lastActivityAt: now,
+                lastActivityAt:
+                  now,
               },
             })
 
@@ -526,7 +719,8 @@ export async function POST(request, { params }) {
                 quotationId:
                   quotation.id,
 
-                actorId: user.id,
+                actorId:
+                  user.id,
 
                 action:
                   'QUOTE_RETURNED_FOR_REVISION',
@@ -554,70 +748,103 @@ export async function POST(request, { params }) {
 
             return tx.quotation.findUnique({
               where: {
-                id: quotation.id,
+                id:
+                  quotation.id,
               },
 
               include: {
                 approvalSteps: {
-                  orderBy: {
-                    stepOrder: 'asc',
-                  },
+                  orderBy: [
+                    {
+                      approvalRound:
+                        'desc',
+                    },
+                    {
+                      stepOrder:
+                        'asc',
+                    },
+                  ],
                 },
               },
             })
           }
         )
 
-      return NextResponse.json(updated)
+      return NextResponse.json(
+        updated
+      )
     }
 
+
     /*
-     * ---------------------------------------------------------
+     * ========================================================
      * APPROVE
-     * ---------------------------------------------------------
+     * ========================================================
+     */
+
+    /*
+     * Find the next approval step.
+     *
+     * Example:
+     *
+     * Step 1 = SALES_MANAGER
+     * Step 2 = FINANCE
+     *
+     * After Manager approves:
+     *
+     * nextStep = FINANCE
      */
     const nextStep =
       currentRoundSteps.find(
         (step) =>
           step.stepOrder >
           currentStep.stepOrder
-      )
+      ) || null
 
     const updated =
       await prisma.$transaction(
         async (tx) => {
+
+          /*
+           * Mark current step approved.
+           */
           await tx.approvalStep.update({
             where: {
-              id: currentStep.id,
+              id:
+                currentStep.id,
             },
 
             data: {
-              status: 'APPROVED',
-              actedById: user.id,
-              actedAt: now,
+              status:
+                'APPROVED',
+
+              actedById:
+                user.id,
+
+              actedAt:
+                now,
+
               reason:
                 reason || null,
             },
           })
 
-          let newQuotationStatus =
-            'PENDING_APPROVAL'
-
           /*
-           * If there is another step,
-           * quotation remains pending.
+           * If another step exists,
+           * keep quotation PENDING_APPROVAL.
            *
-           * Example:
-           * Sales Manager → Finance
+           * If there is no next step,
+           * the entire quotation is approved.
            */
-          if (!nextStep) {
-            newQuotationStatus =
-              'APPROVED'
-          }
+          const newQuotationStatus =
+            nextStep
+              ? 'PENDING_APPROVAL'
+              : 'APPROVED'
 
           await tx.quotation.update({
             where: {
-              id: quotation.id,
+              id:
+                quotation.id,
             },
 
             data: {
@@ -630,16 +857,21 @@ export async function POST(request, { params }) {
                   ? now
                   : null,
 
-              lastActivityAt: now,
+              lastActivityAt:
+                now,
             },
           })
 
+          /*
+           * Record audit trail.
+           */
           await tx.auditLog.create({
             data: {
               quotationId:
                 quotation.id,
 
-              actorId: user.id,
+              actorId:
+                user.id,
 
               action:
                 newQuotationStatus ===
@@ -664,7 +896,8 @@ export async function POST(request, { params }) {
                   currentStep.approverRole,
 
                 nextStepRole:
-                  nextStep?.approverRole ||
+                  nextStep
+                    ?.approverRole ||
                   null,
               },
             },
@@ -672,17 +905,20 @@ export async function POST(request, { params }) {
 
           return tx.quotation.findUnique({
             where: {
-              id: quotation.id,
+              id:
+                quotation.id,
             },
 
             include: {
               approvalSteps: {
                 orderBy: [
                   {
-                    approvalRound: 'desc',
+                    approvalRound:
+                      'desc',
                   },
                   {
-                    stepOrder: 'asc',
+                    stepOrder:
+                      'asc',
                   },
                 ],
               },
@@ -691,7 +927,9 @@ export async function POST(request, { params }) {
         }
       )
 
-    return NextResponse.json(updated)
+    return NextResponse.json(
+      updated
+    )
   } catch (error) {
     console.error(
       'Approval action error:',
@@ -701,9 +939,12 @@ export async function POST(request, { params }) {
     return NextResponse.json(
       {
         error:
-          error.message || 'Internal server error',
+          error.message ||
+          'Internal server error',
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     )
   }
 }

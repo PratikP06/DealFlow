@@ -19,125 +19,126 @@ export async function GET() {
       },
       select: {
         id: true,
-        role: true,
         name: true,
+        role: true,
+        isActive: true,
       },
     })
 
-    if (!user || user.role === 'ADMIN') {
+    if (
+      !user ||
+      !user.isActive ||
+      user.role === 'ADMIN'
+    ) {
       return NextResponse.json(
         { error: 'Forbidden' },
         { status: 403 }
       )
     }
 
+    /*
+     * Sales Rep:
+     *   Only sees negotiations belonging to
+     *   quotations they own.
+     *
+     * Sales Manager / Finance:
+     *   Can see all negotiation requests.
+     */
+
     const where =
       user.role === 'SALES_REP'
         ? {
-            ownerId: user.id,
-            status: {
-              in: ['APPROVED', 'CONFIRMED'],
+            quotation: {
+              ownerId: user.id,
             },
           }
-        : {
-            status: {
-              in: ['APPROVED', 'CONFIRMED'],
-            },
-          }
+        : {}
 
-    const quotations =
-      await prisma.quotation.findMany({
+    const negotiations =
+      await prisma.negotiationRequest.findMany({
         where,
 
-        select: {
-          id: true,
-          quoteNumber: true,
-          status: true,
-          fulfillmentStatus: true,
-          deliveryPromiseDate: true,
-          updatedAt: true,
-
+        include: {
           customer: {
             select: {
               id: true,
               name: true,
+              email: true,
               tier: true,
             },
           },
 
-          lines: {
+          quotation: {
+            select: {
+              id: true,
+              quoteNumber: true,
+              status: true,
+              blendedRiskScore: true,
+              approvalRound: true,
+              ownerId: true,
+              lastActivityAt: true,
+            },
+          },
+
+          quotationLine: {
             select: {
               id: true,
               productId: true,
               quantity: true,
-              lineType: true,
+              unitPrice: true,
+              discountPercent: true,
 
               product: {
                 select: {
                   id: true,
                   sku: true,
                   name: true,
-                  type: true,
-                },
-              },
+                  price: true,
+                  taxPercent: true,
 
-              allocations: {
-                select: {
-                  id: true,
-                  warehouseId: true,
-                  allocatedQuantity: true,
-                  backorderQuantity: true,
-                  status: true,
-
-                  warehouse: {
+                  category: {
                     select: {
                       id: true,
                       name: true,
-                      location: true,
+                      discountCeilingPercent: true,
                     },
                   },
-                },
-
-                orderBy: {
-                  createdAt: 'asc',
                 },
               },
             },
           },
+
+          resolvedBy: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+            },
+          },
         },
 
-        orderBy: {
-          updatedAt: 'desc',
-        },
+        orderBy: [
+          {
+            status: 'asc',
+          },
+          {
+            createdAt: 'desc',
+          },
+        ],
       })
 
     return NextResponse.json({
-      quotations,
-
-      currentUser: {
-        id: user.id,
-        role: user.role,
-        name: user.name,
-
-        approvalAuthority:
-          user.role === 'FINANCE',
-
-        authorityLabel:
-          user.role === 'FINANCE'
-            ? 'Finance / Operations'
-            : 'Monitoring only',
-      },
+      negotiations,
     })
   } catch (error) {
     console.error(
-      'Fulfillment list error:',
+      'Get sales negotiations error:',
       error
     )
 
     return NextResponse.json(
       {
-        error:
-          'Failed to fetch fulfillment data',
+        error: 'Internal server error',
       },
       { status: 500 }
     )
