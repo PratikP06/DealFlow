@@ -1,15 +1,18 @@
 'use client'
+
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 export default function SalesDashboardPage() {
   const router = useRouter()
+
   const [stats, setStats] = useState({
     pendingApprovals: 0,
     openQuotations: 0,
-    atRiskDeals: 0
+    atRiskDeals: 0,
   })
+
   const [activities, setActivities] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -18,7 +21,7 @@ export default function SalesDashboardPage() {
       try {
         const [statsRes, activityRes] = await Promise.all([
           fetch('/api/sales/dashboard/stats'),
-          fetch('/api/sales/dashboard/activity')
+          fetch('/api/sales/dashboard/activity'),
         ])
 
         if (!statsRes.ok || !activityRes.ok) {
@@ -29,7 +32,12 @@ export default function SalesDashboardPage() {
         const statsData = await statsRes.json()
         const activityData = await activityRes.json()
 
-        setStats(statsData)
+        setStats({
+          pendingApprovals: statsData.pendingApprovals ?? 0,
+          openQuotations: statsData.openQuotations ?? 0,
+          atRiskDeals: statsData.atRiskDeals ?? 0,
+        })
+
         setActivities(activityData.activities || [])
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error)
@@ -45,6 +53,7 @@ export default function SalesDashboardPage() {
   const formatDate = (dateString) => {
     const date = new Date(dateString)
     const now = new Date()
+
     const diffMs = now - date
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
@@ -54,7 +63,11 @@ export default function SalesDashboardPage() {
     if (diffMins < 60) return `${diffMins}m ago`
     if (diffHours < 24) return `${diffHours}h ago`
     if (diffDays < 7) return `${diffDays}d ago`
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    })
   }
 
   const getActionLabel = (action) => {
@@ -72,146 +85,323 @@ export default function SalesDashboardPage() {
       APPROVAL_STEP_RETURNED: 'Approval returned',
       NEGOTIATION_REQUESTED: 'Negotiation requested',
       NEGOTIATION_ACCEPTED: 'Negotiation accepted',
-      NEGOTIATION_REJECTED: 'Negotiation rejected'
+      NEGOTIATION_REJECTED: 'Negotiation rejected',
     }
-    return labels[action] || action.replace(/_/g, ' ').toLowerCase()
-  }
 
-  const getActionColor = (action) => {
-    if (action.includes('CREATED') || action.includes('APPROVED') || action.includes('ACCEPTED')) {
-      return 'text-green-400 bg-green-900/30'
-    }
-    if (action.includes('REJECTED') || action.includes('RETURNED')) {
-      return 'text-red-400 bg-red-900/30'
-    }
-    if (action.includes('SUBMITTED') || action.includes('REQUESTED')) {
-      return 'text-yellow-400 bg-yellow-900/30'
-    }
-    return 'text-blue-400 bg-blue-900/30'
-  }
-
-  if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent"></div>
-      </div>
+      labels[action] ||
+      action?.replace(/_/g, ' ').toLowerCase() ||
+      'Activity recorded'
     )
   }
 
+  const getActivityTone = (action) => {
+    if (
+      action?.includes('APPROVED') ||
+      action?.includes('ACCEPTED') ||
+      action === 'QUOTE_CREATED'
+    ) {
+      return {
+        dot: 'bg-[var(--color-success-500)]',
+        icon: 'bg-[var(--color-success-50)] text-[var(--color-success-600)]',
+      }
+    }
+
+    if (
+      action?.includes('REJECTED') ||
+      action?.includes('RETURNED')
+    ) {
+      return {
+        dot: 'bg-[var(--color-danger-500)]',
+        icon: 'bg-[var(--color-danger-50)] text-[var(--color-danger-600)]',
+      }
+    }
+
+    if (
+      action?.includes('SUBMITTED') ||
+      action?.includes('REQUESTED')
+    ) {
+      return {
+        dot: 'bg-[var(--color-warning-500)]',
+        icon: 'bg-[var(--color-warning-50)] text-[var(--color-warning-600)]',
+      }
+    }
+
+    return {
+      dot: 'bg-[var(--color-info-500)]',
+      icon: 'bg-[var(--color-info-50)] text-[var(--color-info-600)]',
+    }
+  }
+
+  if (loading) {
+    return <DashboardSkeleton />
+  }
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="mx-auto w-full max-w-[1440px] space-y-6">
+      {/* Page header */}
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Sales Dashboard</h1>
-          <p className="text-gray-400 mt-1">Welcome back. Here's your sales overview.</p>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-[var(--color-success-500)]" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+              Sales Workspace
+            </span>
+          </div>
+
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-primary)] sm:text-[28px]">
+            Sales Dashboard
+          </h1>
+
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            Your central view of quotations, approvals, and deal health.
+          </p>
         </div>
-        <div className="flex gap-3">
-          <Link
-            href="/dashboard/quotations/new"
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors flex items-center gap-2"
-          >
-            <PlusIcon className="w-5 h-5" />
-            New Quotation
-          </Link>
+
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/dashboard/approvals"
-            className="bg-gray-800 hover:bg-gray-700 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors flex items-center gap-2 border border-gray-600"
+            className="btn btn-secondary btn-lg"
           >
-            <CheckBadgeIcon className="w-5 h-5" />
+            <CheckBadgeIcon className="h-4 w-4" />
             View Approvals
           </Link>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard
-          title="Pending Approvals"
-          value={stats.pendingApprovals}
-          icon={<CheckBadgeIcon className="w-6 h-6" />}
-          color="bg-yellow-500"
-          bgColor="bg-yellow-900/30"
-          borderColor="border-yellow-800"
-          href="/dashboard/approvals"
-        />
-        <StatCard
-          title="Open Quotations"
-          value={stats.openQuotations}
-          icon={<DocumentIcon className="w-6 h-6" />}
-          color="bg-blue-500"
-          bgColor="bg-blue-900/30"
-          borderColor="border-blue-800"
-          href="/dashboard/quotations"
-        />
-        <StatCard
-          title="At-Risk Deals"
-          value={stats.atRiskDeals}
-          icon={<AlertIcon className="w-6 h-6" />}
-          color="bg-red-500"
-          bgColor="bg-red-900/30"
-          borderColor="border-red-800"
-          href="/dashboard/deal-health"
-        />
-      </div>
-
-      <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
           <Link
-            href="/dashboard/quotations"
-            className="text-sm text-blue-400 hover:text-blue-300 font-medium"
+            href="/dashboard/quotations/new"
+            className="btn btn-primary btn-lg shadow-sm"
           >
-            View all
+            <PlusIcon className="h-4 w-4" />
+            New Quotation
           </Link>
         </div>
-        <div className="divide-y divide-gray-700">
-          {activities.length === 0 ? (
-            <div className="px-6 py-12 text-center text-gray-400">
-              <ActivityIcon className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-              <p className="text-lg">No recent activity</p>
-              <p className="text-sm mt-1">Your quotation activity will appear here</p>
-            </div>
-          ) : (
-            activities.map((activity) => (
-              <div
-                key={activity.id}
-                className="px-6 py-4 hover:bg-gray-700/50 transition-colors"
+      </header>
+
+      {/* KPI cards */}
+      <section
+        aria-label="Sales overview"
+        className="grid grid-cols-1 gap-4 md:grid-cols-3"
+      >
+        <MetricCard
+          title="Pending Approvals"
+          value={stats.pendingApprovals}
+          description="Quotes waiting for action"
+          href="/dashboard/approvals"
+          icon={<CheckBadgeIcon className="h-5 w-5" />}
+          tone="warning"
+        />
+
+        <MetricCard
+          title="Open Quotations"
+          value={stats.openQuotations}
+          description="Active sales opportunities"
+          href="/dashboard/quotations"
+          icon={<DocumentIcon className="h-5 w-5" />}
+          tone="primary"
+        />
+
+        <MetricCard
+          title="At-Risk Deals"
+          value={stats.atRiskDeals}
+          description="High-risk deals with no recent activity"
+          href="/dashboard/deal-health"
+          icon={<AlertIcon className="h-5 w-5" />}
+          tone="danger"
+        />
+      </section>
+
+      {/* Activity */}
+      <section className="card overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4 sm:px-6">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
+              Recent Activity
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">
+              Latest activity across your quotations
+            </p>
+          </div>
+
+          <Link
+            href="/dashboard/quotations"
+            className="group inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-primary-600)] transition-colors hover:text-[var(--color-primary-700)]"
+          >
+            View quotations
+            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        </div>
+
+        {activities.length === 0 ? (
+          <EmptyActivityState />
+        ) : (
+          <div>
+            {activities.map((activity, index) => {
+              const tone = getActivityTone(activity.action)
+
+              return (
+                <ActivityRow
+                  key={activity.id}
+                  activity={activity}
+                  tone={tone}
+                  isLast={index === activities.length - 1}
+                  formatDate={formatDate}
+                  getActionLabel={getActionLabel}
+                />
+              )
+            })}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+/* =========================================================
+   Metric Card
+   ========================================================= */
+
+function MetricCard({
+  title,
+  value,
+  description,
+  href,
+  icon,
+  tone,
+}) {
+  const tones = {
+    primary: {
+      icon: 'bg-[var(--color-primary-50)] text-[var(--color-primary-600)]',
+      value: 'text-[var(--color-text-primary)]',
+      hover: 'hover:border-[var(--color-primary-200)]',
+    },
+    warning: {
+      icon: 'bg-[var(--color-warning-50)] text-[var(--color-warning-600)]',
+      value: 'text-[var(--color-text-primary)]',
+      hover: 'hover:border-[var(--color-warning-100)]',
+    },
+    danger: {
+      icon: 'bg-[var(--color-danger-50)] text-[var(--color-danger-600)]',
+      value: 'text-[var(--color-text-primary)]',
+      hover: 'hover:border-[var(--color-danger-100)]',
+    },
+  }
+
+  const selectedTone = tones[tone] || tones.primary
+
+  return (
+    <Link
+      href={href}
+      className={`group card block p-5 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm ${selectedTone.hover}`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-[var(--color-text-secondary)]">
+            {title}
+          </p>
+
+          <p
+            className={`mt-3 text-3xl font-bold tracking-tight ${selectedTone.value}`}
+          >
+            {value}
+          </p>
+
+          <p className="mt-1.5 text-xs text-[var(--color-text-tertiary)]">
+            {description}
+          </p>
+        </div>
+
+        <div
+          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${selectedTone.icon}`}
+        >
+          {icon}
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center gap-1 text-xs font-medium text-[var(--color-text-tertiary)] transition-colors group-hover:text-[var(--color-primary-600)]">
+        Open
+        <ArrowRightIcon className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+      </div>
+    </Link>
+  )
+}
+
+/* =========================================================
+   Activity Row
+   ========================================================= */
+
+function ActivityRow({
+  activity,
+  tone,
+  isLast,
+  formatDate,
+  getActionLabel,
+}) {
+  const quotation = activity.quotation
+  const quotationHref = quotation?.id
+    ? `/dashboard/quotations/${quotation.id}`
+    : null
+
+  return (
+    <div
+      className={`group px-5 py-4 transition-colors hover:bg-[var(--color-surface-secondary)] sm:px-6 ${
+        !isLast ? 'border-b border-[var(--color-border)]' : ''
+      }`}
+    >
+      <div className="flex items-start gap-3.5">
+        {/* Activity icon */}
+        <div className="relative flex-shrink-0">
+          <div
+            className={`flex h-9 w-9 items-center justify-center rounded-full ${tone.icon}`}
+          >
+            <ActivityIcon className="h-4 w-4" />
+          </div>
+
+          {!isLast && (
+            <div className="absolute left-1/2 top-9 h-[calc(100%+1rem)] w-px -translate-x-1/2 bg-[var(--color-border)]" />
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-[var(--color-text-primary)]">
+              {getActionLabel(activity.action)}
+            </p>
+
+            <time
+              className="flex-shrink-0 text-xs text-[var(--color-text-tertiary)]"
+              dateTime={activity.createdAt}
+            >
+              {formatDate(activity.createdAt)}
+            </time>
+          </div>
+
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--color-text-secondary)]">
+            {quotationHref ? (
+              <Link
+                href={quotationHref}
+                className="font-semibold text-[var(--color-primary-600)] hover:text-[var(--color-primary-700)]"
               >
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getActionColor(activity.action)}`}
-                  >
-                    <ActivityIcon className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white">
-                      {getActionLabel(activity.action)}
-                    </p>
-                    <p className="text-sm text-gray-400 mt-0.5">
-                      {activity.quotation ? (
-                        <>
-                          <span className="font-medium text-blue-300">{activity.quotation.quoteNumber}</span>
-                          {' '}•{' '}
-                          <span>{activity.quotation.customer?.name}</span>
-                        </>
-                      ) : (
-                        activity.entityType
-                      )}
-                    </p>
-                    {activity.actor && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        By {activity.actor.name}
-                      </p>
-                    )}
-                  </div>
-                  <time
-                    className="text-xs text-gray-500 flex-shrink-0"
-                    dateTime={activity.createdAt}
-                  >
-                    {formatDate(activity.createdAt)}
-                  </time>
-                </div>
-              </div>
-            ))
+                {quotation.quoteNumber}
+              </Link>
+            ) : (
+              <span className="font-medium">
+                {activity.entityType || 'System activity'}
+              </span>
+            )}
+
+            {quotation?.customer?.name && (
+              <>
+                <span className="text-[var(--color-text-tertiary)]">•</span>
+                <span>{quotation.customer.name}</span>
+              </>
+            )}
+          </div>
+
+          {activity.actor?.name && (
+            <p className="mt-1.5 text-[11px] text-[var(--color-text-tertiary)]">
+              By {activity.actor.name}
+            </p>
           )}
         </div>
       </div>
@@ -219,58 +409,214 @@ export default function SalesDashboardPage() {
   )
 }
 
-function StatCard({ title, value, icon, color, bgColor, borderColor, href }) {
+/* =========================================================
+   Empty Activity
+   ========================================================= */
+
+function EmptyActivityState() {
   return (
-    <Link href={href} className={`bg-gray-800 rounded-xl border p-6 transition-colors hover:border-gray-600 ${borderColor}`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-300">{title}</p>
-          <p className="text-3xl font-bold text-white mt-2">{value}</p>
-        </div>
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${color} ${bgColor}`}>
-          {icon}
-        </div>
+    <div className="empty-state">
+      <div className="empty-state-icon flex items-center justify-center rounded-full bg-[var(--color-surface-tertiary)]">
+        <ActivityIcon className="h-6 w-6" />
       </div>
-    </Link>
+
+      <h3 className="empty-state-title">
+        No recent activity
+      </h3>
+
+      <p className="empty-state-text">
+        Quotation and approval activity will appear here as your sales workflow progresses.
+      </p>
+
+      <Link
+        href="/dashboard/quotations/new"
+        className="btn btn-primary btn-sm mt-5"
+      >
+        <PlusIcon className="h-4 w-4" />
+        Create quotation
+      </Link>
+    </div>
   )
 }
 
+/* =========================================================
+   Loading Skeleton
+   ========================================================= */
+
+function DashboardSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-[1440px] animate-pulse space-y-6">
+      <div className="flex items-end justify-between gap-4">
+        <div className="space-y-2">
+          <div className="h-3 w-28 rounded bg-[var(--color-surface-tertiary)]" />
+          <div className="h-8 w-52 rounded bg-[var(--color-surface-tertiary)]" />
+          <div className="h-4 w-80 max-w-full rounded bg-[var(--color-surface-tertiary)]" />
+        </div>
+
+        <div className="hidden gap-2 sm:flex">
+          <div className="h-10 w-32 rounded-md bg-[var(--color-surface-tertiary)]" />
+          <div className="h-10 w-36 rounded-md bg-[var(--color-surface-tertiary)]" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {[1, 2, 3].map((item) => (
+          <div
+            key={item}
+            className="card h-[164px] p-5"
+          >
+            <div className="flex justify-between">
+              <div className="space-y-3">
+                <div className="h-4 w-28 rounded bg-[var(--color-surface-tertiary)]" />
+                <div className="h-9 w-16 rounded bg-[var(--color-surface-tertiary)]" />
+              </div>
+
+              <div className="h-10 w-10 rounded-lg bg-[var(--color-surface-tertiary)]" />
+            </div>
+
+            <div className="mt-5 h-3 w-36 rounded bg-[var(--color-surface-tertiary)]" />
+          </div>
+        ))}
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="border-b border-[var(--color-border)] px-6 py-4">
+          <div className="h-4 w-32 rounded bg-[var(--color-surface-tertiary)]" />
+          <div className="mt-2 h-3 w-52 rounded bg-[var(--color-surface-tertiary)]" />
+        </div>
+
+        {[1, 2, 3, 4].map((item) => (
+          <div
+            key={item}
+            className="flex gap-3.5 border-b border-[var(--color-border)] px-6 py-4"
+          >
+            <div className="h-9 w-9 flex-shrink-0 rounded-full bg-[var(--color-surface-tertiary)]" />
+
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-40 rounded bg-[var(--color-surface-tertiary)]" />
+              <div className="h-3 w-56 rounded bg-[var(--color-surface-tertiary)]" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* =========================================================
+   Icons
+   ========================================================= */
+
 function PlusIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 5v14m7-7H5"
+      />
     </svg>
   )
 }
 
 function CheckBadgeIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12.75l2 2 4-4m6 1.25a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
     </svg>
   )
 }
 
 function DocumentIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+      />
     </svg>
   )
 }
 
 function AlertIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 9v3m0 3h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+      />
     </svg>
   )
 }
 
 function ActivityIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 6v6l4 2m5-2a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    </svg>
+  )
+}
+
+function ArrowRightIcon({ className }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M5 12h14m-6-6l6 6-6 6"
+      />
     </svg>
   )
 }
