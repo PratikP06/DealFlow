@@ -18,7 +18,7 @@ export default function WarehousesAdminPage() {
   const [editingStock, setEditingStock] = useState(null)
 
   const [warehouseName, setWarehouseName] = useState('')
-  const [shippingWeight, setShippingWeight] = useState('1')
+  const [shippingWeight, setShippingWeight] = useState('')
 
   const [stockWarehouse, setStockWarehouse] = useState('')
   const [stockProduct, setStockProduct] = useState('')

@@ -177,19 +177,19 @@ export default function NewQuotationPage() {
     return Number(product.price || 0)
   }
 
-  const getAllowedDiscount = (product) => {
-    if (!product) return 0
+const getAllowedDiscount = (product) => {
+  if (!product) return 0
 
-    const customerLimit = Number(
-      selectedCustomer?.discountTierRule?.maxDiscountPercent || 0
-    )
+  const customerLimit = Number(
+    selectedCustomer?.maxDiscountPercent || 0
+  )
 
-    const categoryLimit = Number(
-      product.category?.discountCeilingPercent || 0
-    )
+  const categoryLimit = Number(
+    product.category?.discountCeilingPercent || 0
+  )
 
-    return Math.min(customerLimit, categoryLimit)
-  }
+  return Math.min(customerLimit, categoryLimit)
+}
 
   const calculatedLines = useMemo(() => {
     return lines.map((line) => {

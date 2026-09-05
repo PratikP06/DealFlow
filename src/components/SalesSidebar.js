@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
   { name: 'Quotations', href: '/dashboard/quotations', icon: DocumentIcon },
-  { name: 'Approvals', href: '/dashboard/approvals', icon: CheckBadgeIcon },
+  { name: 'Approvals', href: '/dashboard/approvals', icon: CheckBadgeIcon, approversOnly: true },
   { name: 'Fulfillment', href: '/dashboard/fulfillment', icon: TruckIcon },
   { name: 'Subscriptions', href: '/dashboard/subscriptions', icon: ArrowPathIcon },
   { name: 'Invoices', href: '/dashboard/invoices', icon: DocumentTextIcon },
@@ -62,24 +62,40 @@ export default function SalesSidebar({ user, onClose }) {
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto" aria-label="Main navigation">
-            {navigation.map((item) => {
-              const active = isActive(item.href)
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${
-                    active
-                      ? 'bg-[var(--color-bg-sidebar-active)] text-[var(--color-primary-300)]'
-                      : 'text-slate-400 hover:bg-[var(--color-bg-sidebar-hover)] hover:text-slate-200'
-                  }`}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  <item.icon className="w-[18px] h-[18px] flex-shrink-0" aria-hidden="true" />
-                  {item.name}
-                </Link>
-              )
-            })}
+            {navigation
+  .filter((item) => {
+    if (!item.approversOnly) return true
+
+    return (
+      user?.role === 'SALES_MANAGER' ||
+      user?.role === 'FINANCE'
+    )
+  })
+  .map((item) => {
+    const active = isActive(item.href)
+
+    return (
+      <Link
+        key={item.name}
+        href={item.href}
+        className={`flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${
+          active
+            ? 'bg-[var(--color-bg-sidebar-active)] text-[var(--color-primary-300)]'
+            : 'text-slate-400 hover:bg-[var(--color-bg-sidebar-hover)] hover:text-slate-200'
+        }`}
+        aria-current={
+          active ? 'page' : undefined
+        }
+      >
+        <item.icon
+          className="w-[18px] h-[18px] flex-shrink-0"
+          aria-hidden="true"
+        />
+
+        {item.name}
+      </Link>
+    )
+  })}
           </nav>
 
           {/* Admin link */}
