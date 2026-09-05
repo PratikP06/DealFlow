@@ -1,0 +1,546 @@
+// DealFlow360 Schema v1
+// PostgreSQL + Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  SALES_REP
+  SALES_MANAGER
+  FINANCE
+}
+
+enum CustomerTier {
+  BRONZE
+  SILVER
+  GOLD
+}
+
+enum ProductType {
+  PHYSICAL
+  SERVICE
+}
+
+enum LineType {
+  ONE_TIME
+  RECURRING
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum ApprovalRole {
+  SALES_MANAGER
+  FINANCE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  RETURNED
+  SKIPPED
+}
+
+enum QuotationStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  RETURNED
+  SENT
+  UNDER_NEGOTIATION
+  CONFIRMED
+  CANCELLED
+}
+
+enum FulfillmentStatus {
+  PENDING
+  PARTIALLY_ALLOCATED
+  ALLOCATED
+  FULFILLED
+  BACKORDERED
+}
+
+enum BillingScheduleStatus {
+  SCHEDULED
+  INVOICED
+  PAID
+  CANCELLED
+  CREDITED
+}
+
+enum InvoiceType {
+  ONE_TIME
+  RECURRING
+  CREDIT_NOTE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  UPI
+  OTHER
+}
+
+enum NegotiationType {
+  DISCOUNT
+  QUANTITY
+  LINE_CHANGE
+  COMMENT
+}
+
+enum NegotiationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id                   String               @id @default(uuid())
+  email                String               @unique
+  passwordHash         String
+  name                 String
+  role                 UserRole
+  isActive             Boolean              @default(true)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  ownedQuotations      Quotation[]          @relation("QuotationOwner")
+  approvalActions      ApprovalStep[]       @relation("ApprovalActor")
+  auditLogs            AuditLog[]
+  resolvedNegotiations NegotiationRequest[] @relation("NegotiationResolver")
+
+  @@index([role])
+}
+
+model Customer {
+  id           String       @id @default(uuid())
+  name         String
+  email        String       @unique
+  passwordHash String
+  phone        String?
+  tier         CustomerTier
+  isActive     Boolean      @default(true)
+  priceListId  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  priceList    PriceList?           @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+  quotations   Quotation[]
+  negotiations NegotiationRequest[]
+
+  @@index([tier])
+  @@index([priceListId])
+}
+
+model DiscountTierRule {
+  id                 String       @id @default(uuid())
+  tier               CustomerTier @unique
+  maxDiscountPercent Decimal      @db.Decimal(5, 2)
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+}
+
+model Category {
+  id                     String   @id @default(uuid())
+  name                   String   @unique
+  discountCeilingPercent Decimal  @db.Decimal(5, 2)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  products Product[]
+
+  @@index([isActive])
+}
+
+model Product {
+  id            String      @id @default(uuid())
+  sku           String      @unique
+  name          String
+  description   String?
+  type          ProductType @default(PHYSICAL)
+  categoryId    String
+  price         Decimal     @db.Decimal(12, 2)
+  costPrice     Decimal?    @db.Decimal(12, 2)
+  marginPercent Decimal?    @db.Decimal(5, 2)
+  taxPercent    Decimal     @default(0) @db.Decimal(5, 2)
+  unit          String      @default("unit")
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  category          Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  priceListItems    PriceListItem[]
+  warehouseStock    WarehouseStock[]
+  quotationLines    QuotationLine[]    @relation("QuotationLineProduct")
+  subscriptionPlans SubscriptionPlan[]
+  invoiceLines      InvoiceLine[]
+  triggerUpsells    UpsellRule[]       @relation("UpsellTrigger")
+  suggestedUpsells  UpsellRule[]       @relation("UpsellSuggestion")
+
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+model PriceList {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items     PriceListItem[]
+  customers Customer[]
+}
+
+model PriceListItem {
+  id          String   @id @default(uuid())
+  priceListId String
+  productId   String
+  price       Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  priceList PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([priceListId, productId])
+  @@index([productId])
+}
+
+model Warehouse {
+  id                 String   @id @default(uuid())
+  name               String   @unique
+  location           String?
+  shippingCostWeight Decimal  @default(1) @db.Decimal(10, 2)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  stock       WarehouseStock[]
+  allocations FulfillmentAllocation[]
+}
+
+model WarehouseStock {
+  id          String   @id @default(uuid())
+  warehouseId String
+  productId   String
+  quantity    Decimal  @db.Decimal(12, 2)
+  updatedAt   DateTime @updatedAt
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([warehouseId, productId])
+  @@index([productId])
+}
+
+model SubscriptionPlan {
+  id                        String          @id @default(uuid())
+  name                      String
+  productId                 String
+  price                     Decimal         @db.Decimal(12, 2)
+  billingInterval           BillingInterval
+  durationMonths            Int
+  prorationEnabled          Boolean         @default(true)
+  cancellationCreditEnabled Boolean         @default(true)
+  isActive                  Boolean         @default(true)
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @updatedAt
+
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quotationLines QuotationLine[]
+
+  @@index([productId])
+  @@index([isActive])
+}
+
+model UpsellRule {
+  id                 String   @id @default(uuid())
+  triggerProductId   String
+  suggestedProductId String
+  promoted           Boolean  @default(false)
+  priority           Int      @default(0)
+  minMarginPercent   Decimal? @db.Decimal(5, 2)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  triggerProduct   Product @relation("UpsellTrigger", fields: [triggerProductId], references: [id], onDelete: Cascade)
+  suggestedProduct Product @relation("UpsellSuggestion", fields: [suggestedProductId], references: [id], onDelete: Restrict)
+
+  @@unique([triggerProductId, suggestedProductId])
+  @@index([triggerProductId, isActive])
+}
+
+model ApprovalRule {
+  id            String         @id @default(uuid())
+  name          String
+  minRiskScore  Decimal        @db.Decimal(10, 2)
+  maxRiskScore  Decimal?       @db.Decimal(10, 2)
+  requiredRoles ApprovalRole[]
+  priority      Int            @default(0)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([minRiskScore, maxRiskScore])
+  @@index([isActive, priority])
+}
+
+model Quotation {
+  id                  String            @id @default(uuid())
+  quoteNumber         String            @unique
+  customerId          String
+  ownerId             String
+  status              QuotationStatus   @default(DRAFT)
+  blendedRiskScore    Decimal           @default(0) @db.Decimal(10, 2)
+  approvalRound       Int               @default(0)
+  fulfillmentStatus   FulfillmentStatus @default(PENDING)
+  deliveryPromiseDate DateTime?
+  lastActivityAt      DateTime          @default(now())
+  submittedAt         DateTime?
+  approvedAt          DateTime?
+  confirmedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  customer         Customer                @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  owner            User                    @relation("QuotationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  lines            QuotationLine[]
+  approvalSteps    ApprovalStep[]
+  auditLogs        AuditLog[]
+  allocations      FulfillmentAllocation[]
+  billingSchedules BillingScheduleEntry[]
+  invoices         Invoice[]
+  negotiations     NegotiationRequest[]
+
+  @@index([customerId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([lastActivityAt])
+  @@index([fulfillmentStatus])
+}
+
+model QuotationLine {
+  id                             String   @id @default(uuid())
+  quotationId                    String
+  productId                      String
+  subscriptionPlanId             String?
+  lineType                       LineType
+  quantity                       Decimal  @db.Decimal(12, 2)
+  unitPrice                      Decimal  @db.Decimal(12, 2)
+  discountPercent                Decimal  @default(0) @db.Decimal(5, 2)
+  allowedDiscountPercentSnapshot Decimal  @db.Decimal(5, 2)
+  discountOveragePercent         Decimal  @default(0) @db.Decimal(5, 2)
+  taxPercentSnapshot             Decimal  @default(0) @db.Decimal(5, 2)
+  marginPercentSnapshot          Decimal? @db.Decimal(5, 2)
+  isUpsellAdd                    Boolean  @default(false)
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
+
+  quotation           Quotation               @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product             Product                 @relation("QuotationLineProduct", fields: [productId], references: [id], onDelete: Restrict)
+  subscriptionPlan    SubscriptionPlan?       @relation(fields: [subscriptionPlanId], references: [id], onDelete: Restrict)
+  allocations         FulfillmentAllocation[]
+  billingSchedules    BillingScheduleEntry[]
+  negotiationRequests NegotiationRequest[]
+
+  @@index([quotationId])
+  @@index([productId])
+  @@index([subscriptionPlanId])
+  @@index([lineType])
+}
+
+model ApprovalStep {
+  id            String         @id @default(uuid())
+  quotationId   String
+  approvalRound Int
+  stepOrder     Int
+  approverRole  ApprovalRole
+  status        ApprovalStatus @default(PENDING)
+  actedById     String?
+  actedAt       DateTime?
+  reason        String?
+  createdAt     DateTime       @default(now())
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  actedBy   User?     @relation("ApprovalActor", fields: [actedById], references: [id], onDelete: SetNull)
+
+  @@unique([quotationId, approvalRound, stepOrder])
+  @@index([quotationId, approvalRound])
+  @@index([approverRole, status])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  quotationId String?
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  quotation Quotation? @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  actor     User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([quotationId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model FulfillmentAllocation {
+  id                    String            @id @default(uuid())
+  quotationId           String
+  quotationLineId       String
+  warehouseId           String
+  allocatedQuantity     Decimal           @db.Decimal(12, 2)
+  backorderQuantity     Decimal           @default(0) @db.Decimal(12, 2)
+  estimatedShippingCost Decimal           @default(0) @db.Decimal(12, 2)
+  manualOverride        Boolean           @default(false)
+  status                FulfillmentStatus @default(PENDING)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  quotation     Quotation     @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotationLine QuotationLine @relation(fields: [quotationLineId], references: [id], onDelete: Cascade)
+  warehouse     Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@index([quotationId])
+  @@index([quotationLineId])
+  @@index([warehouseId])
+}
+
+model BillingScheduleEntry {
+  id              String                @id @default(uuid())
+  quotationId     String
+  quotationLineId String
+  periodStart     DateTime
+  periodEnd       DateTime
+  billingDate     DateTime
+  quantity        Decimal               @db.Decimal(12, 2)
+  amount          Decimal               @db.Decimal(12, 2)
+  status          BillingScheduleStatus @default(SCHEDULED)
+  invoiceId       String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  quotation     Quotation     @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotationLine QuotationLine @relation(fields: [quotationLineId], references: [id], onDelete: Cascade)
+  invoice       Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([quotationId])
+  @@index([quotationLineId, billingDate])
+  @@index([billingDate, status])
+  @@index([invoiceId])
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique
+  quotationId   String
+  type          InvoiceType
+  status        InvoiceStatus @default(DRAFT)
+  subtotal      Decimal       @db.Decimal(12, 2)
+  taxAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount   Decimal       @db.Decimal(12, 2)
+  paidAmount    Decimal       @default(0) @db.Decimal(12, 2)
+  creditAmount  Decimal       @default(0) @db.Decimal(12, 2)
+  creditReason  String?
+  issueDate     DateTime?
+  dueDate       DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  quotation      Quotation              @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  lines          InvoiceLine[]
+  payments       Payment[]
+  billingEntries BillingScheduleEntry[]
+
+  @@index([quotationId])
+  @@index([status])
+  @@index([type])
+}
+
+model InvoiceLine {
+  id              String   @id @default(uuid())
+  invoiceId       String
+  productId       String?
+  description     String
+  lineType        LineType
+  quantity        Decimal  @db.Decimal(12, 2)
+  unitPrice       Decimal  @db.Decimal(12, 2)
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  taxPercent      Decimal  @default(0) @db.Decimal(5, 2)
+  lineAmount      Decimal  @db.Decimal(12, 2)
+  createdAt       DateTime @default(now())
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+  @@index([productId])
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  invoiceId String
+  amount    Decimal       @db.Decimal(12, 2)
+  method    PaymentMethod
+  reference String?
+  paidAt    DateTime      @default(now())
+  createdAt DateTime      @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([paidAt])
+}
+
+model NegotiationRequest {
+  id               String            @id @default(uuid())
+  quotationId      String
+  customerId       String
+  quotationLineId  String?
+  type             NegotiationType
+  proposedDiscount Decimal?          @db.Decimal(5, 2)
+  proposedQuantity Decimal?          @db.Decimal(12, 2)
+  message          String?
+  status           NegotiationStatus @default(PENDING)
+  resolvedById     String?
+  resolvedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  quotation     Quotation      @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  quotationLine QuotationLine? @relation(fields: [quotationLineId], references: [id], onDelete: SetNull)
+  resolvedBy    User?          @relation("NegotiationResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([quotationId, status])
+  @@index([customerId])
+  @@index([quotationLineId])
+}
